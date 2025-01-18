@@ -1,7 +1,13 @@
 import pandas as pd
 import os
-import openpyxl
 import streamlit as st
+
+# Try to import openpyxl and handle import error
+try:
+    import openpyxl
+except ImportError as e:
+    st.error("Missing required dependency: 'openpyxl'. Please install it using pip or conda.")
+    st.stop()
 
 # Function to merge Excel files
 def merge_excel_files(uploaded_files):
