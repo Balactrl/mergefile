@@ -1,5 +1,6 @@
 import pandas as pd
 import os
+import openpyxl
 import streamlit as st
 
 # Function to merge Excel files
