@@ -6,7 +6,10 @@ import streamlit as st
 st.markdown("""
     <style>
         .cat-icon {
-            display: none;
+            display: none !important;
+        }
+        .stApp {
+            visibility: visible !important;
         }
     </style>
 """, unsafe_allow_html=True)
