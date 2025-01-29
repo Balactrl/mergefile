@@ -1,6 +1,7 @@
 import pandas as pd
 import os
 import streamlit as st
+import io
 
 # Inject custom CSS to hide the cat symbol (or any other symbol)
 st.markdown("""
