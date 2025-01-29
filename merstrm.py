@@ -2,6 +2,15 @@ import pandas as pd
 import os
 import streamlit as st
 
+# Inject custom CSS to hide the cat symbol (or any other symbol)
+st.markdown("""
+    <style>
+        .cat-icon {
+            display: none;
+        }
+    </style>
+""", unsafe_allow_html=True)
+
 # Function to merge Excel files
 def merge_excel_files(uploaded_files):
     merged_data = {}
