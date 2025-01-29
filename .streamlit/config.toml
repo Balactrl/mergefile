@@ -1,14 +1,2 @@
-[theme]
-base="light"  # Or "dark" based on your preference
-primaryColor="#F63366"
-font="sans serif"
-
 [server]
-headless = true
-enableCORS = false
-
-[client]
-showArrow = false
-
-[global]
-hide_streamlit_markers = true
+maxUploadSize = 1024
