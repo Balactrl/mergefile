@@ -1,69 +1,104 @@
 import pandas as pd
-import os
 import streamlit as st
+import warnings
+import io
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# Inject custom CSS to hide the cat symbol (or any other symbol)
-st.markdown("""
-    <style>
-        .cat-icon {
-            display: none !important;
-        }
-        .stApp {
-            visibility: visible !important;
-        }
-    </style>
-""", unsafe_allow_html=True)
+# Suppress openpyxl date warnings
+warnings.filterwarnings(
+    "ignore",
+    message="Cell .* is marked as a date but the serial value .* is outside the limits for dates",
+    module="openpyxl"
+)
 
-# Function to merge Excel files
-def merge_excel_files(uploaded_files):
-    merged_data = {}
+def read_sheet(file_name, file_bytes, sheet_name):
+    """
+    Reads a specific sheet from the Excel file (provided as bytes).
+    Returns a DataFrame with an extra 'Source_File' column if the sheet exists.
+    """
+    try:
+        # Create a new BytesIO stream for each thread to avoid pointer issues
+        excel_file = pd.ExcelFile(io.BytesIO(file_bytes))
+        if sheet_name in excel_file.sheet_names:
+            df = pd.read_excel(excel_file, sheet_name=sheet_name)
+            df['Source_File'] = file_name
+            return df
+    except Exception as e:
+        # Propagate exception so it can be caught in the main thread
+        raise e
+    return None
+
+def merge_excel_files(uploaded_files_data):
+    """
+    Merges sheets (with the same name) from all uploaded Excel files concurrently.
     
-    # Load sheet names from the first file to ensure matching structure
-    excel_file1 = pd.ExcelFile(uploaded_files[0])
-    sheet_names = excel_file1.sheet_names
-
-    # Iterate through each sheet
-    for sheet_name in sheet_names:
-        merged_sheets = []
-
-        # Process the same sheet across all uploaded files
-        for file in uploaded_files:
+    Parameters:
+        uploaded_files_data (list): List of tuples (file_name, file_bytes)
+        
+    Returns:
+        dict: Keys are sheet names, values are merged DataFrames.
+    """
+    # Read sheet names from the first file to enforce a consistent structure.
+    first_file_name, first_file_bytes = uploaded_files_data[0]
+    sheet_names = pd.ExcelFile(io.BytesIO(first_file_bytes)).sheet_names
+    
+    # Dictionary to hold lists of DataFrames per sheet name.
+    results_by_sheet = {sheet: [] for sheet in sheet_names}
+    futures = {}
+    
+    # Create a thread pool to process each (sheet, file) combination concurrently.
+    with ThreadPoolExecutor() as executor:
+        for sheet_name in sheet_names:
+            for file_name, file_bytes in uploaded_files_data:
+                future = executor.submit(read_sheet, file_name, file_bytes, sheet_name)
+                futures[future] = (sheet_name, file_name)
+                
+        # Gather the results as they complete.
+        for future in as_completed(futures):
+            sheet_name, file_name = futures[future]
             try:
-                excel_file = pd.ExcelFile(file)
-                if sheet_name in excel_file.sheet_names:
-                    df = pd.read_excel(excel_file, sheet_name=sheet_name)
-                    df['Source_File'] = file.name  # Add a column with the source file name
-                    merged_sheets.append(df)
+                result = future.result()
+                if result is not None:
+                    results_by_sheet[sheet_name].append(result)
             except Exception as e:
-                st.error(f"Error reading {sheet_name} from {file.name}: {e}")
-
-        # Merge the data for the current sheet
-        if merged_sheets:
-            merged_data[sheet_name] = pd.concat(merged_sheets, ignore_index=True)
-
+                st.error(f"Error reading sheet '{sheet_name}' from file '{file_name}': {e}")
+    
+    # Concatenate dataframes for each sheet.
+    merged_data = {}
+    for sheet_name, dfs in results_by_sheet.items():
+        if dfs:
+            merged_data[sheet_name] = pd.concat(dfs, ignore_index=True)
     return merged_data
 
 # Streamlit application
 st.title("Upload Excel Files")
-st.write("Upload multiple Excel files to merge sheets with the same name.")
+st.write("Upload multiple Excel files to merge sheets with the same name concurrently.")
 
 uploaded_files = st.file_uploader("Choose Excel files", type=["xlsx"], accept_multiple_files=True)
 
 if st.button("Merge Files"):
-    if len(uploaded_files) < 2:
+    if not uploaded_files or len(uploaded_files) < 2:
         st.error("At least two files are required for merging.")
     else:
         try:
-            merged_data = merge_excel_files(uploaded_files)
-
-            # Save each merged sheet to the output file
-            output_path = os.path.join(os.getcwd(), 'merged_data.xlsx')
-            with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+            # Convert uploaded files into a list of (file_name, file_bytes)
+            uploaded_files_data = [(file.name, file.getvalue()) for file in uploaded_files]
+            
+            merged_data = merge_excel_files(uploaded_files_data)
+            
+            # Write merged data to a BytesIO object instead of disk
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 for sheet_name, df in merged_data.items():
                     df.to_excel(writer, sheet_name=sheet_name, index=False)
+            output.seek(0)  # Reset pointer to the beginning
 
-            # Provide download link for the merged file
-            with open(output_path, "rb") as f:
-                st.download_button("Download Merged Excel File", f, file_name="merged_data.xlsx")
+            st.success("Excel files merged successfully!")
+            st.download_button(
+                "Download Merged Excel File",
+                data=output,
+                file_name="merged_data.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
         except Exception as e:
             st.error(f"An error occurred: {e}")
